@@ -11,20 +11,18 @@ using namespace cv;
 typedef vector<vector<Point> > vvp;
 typedef vector<Point2f> vp;
 
-bool errorOccurred  = 0;
+int errorOccurred  = 0;
 
 void extractInformation(Mat omrSheet)
 {
     Mat gray,thresholded, box;
-    //cvtColor(omrSheet,gray,CV_BGR2GRAY);
-    //threshold(gray,thresholded,0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
     double offsetx = 0.0408*omrSheet.cols;
     double offsety = 0.0488*omrSheet.rows;
     double stepX = (omrSheet.cols-offsetx+0.0139*omrSheet.cols)/21.0;
     double stepY = (omrSheet.rows-offsety)/25.0;
-    for(int i=0;i<21;i++)
+    for(int j=0;j<25;j++)
     {
-        for(int j=0; j<25; j++)
+        for(int i=0; i<21; i++)
         {
             debug rectangle(omrSheet,Rect(Point(offsetx+i*stepX,offsety+j*stepY),
                                     Point(offsetx+(i+1)*stepX,offsety+(j+1)*stepY)),Scalar(0,255,0));
@@ -41,18 +39,16 @@ void extractInformation(Mat omrSheet)
             box = omrSheet(crop);
             cvtColor(box,gray,CV_BGR2GRAY);
             threshold(gray,thresholded,0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
-            namedWindow("Before",CV_WINDOW_NORMAL);
-            namedWindow("After",CV_WINDOW_NORMAL);
-            imshow("Before",thresholded);
             dilate(thresholded,thresholded,getStructuringElement(MORPH_RECT,Size(3,3)));
-            imshow("After",thresholded);
-            waitKey(0);
-            cout<<countNonZero(thresholded)*100.0/(thresholded.rows*thresholded.cols)<<endl;
+            //cout<<countNonZero(thresholded)*100.0/(thresholded.rows*thresholded.cols)<<endl;
+            if(countNonZero(thresholded)*100.0/(thresholded.rows*thresholded.cols)<70.0)
+            {
+                cout<<j+1<<" "<<i*5<<endl;
+            }
         }
     }
     debug namedWindow("Sheet1",CV_WINDOW_NORMAL);
     debug imshow("Sheet1",omrSheet);
-    //debug imshow("Thresholded",thresholded);
     debug waitKey(0);
 }
 
@@ -179,11 +175,15 @@ vp findOMR(vvp marks, Mat input, vvp &cornerContours)
             usedCorner[selectedPos] = 1;
         }
     }
+    else if(marks.size()<6)
+    {
+        cout<<"Initialization failed."<<endl;
+        errorOccurred = 1;
+    }
     else
     {
-        // TODO
-        debug cout<<"Initialization failed."<<endl;
-        errorOccurred =1;
+        cout<<"Initialization failed."<<endl;
+        errorOccurred = 2;
     }
 
     return corners;
@@ -250,11 +250,16 @@ int main()
     vp corners;
     marks = findMarks(input);
     corners = findOMR(marks,input, cornerContours);
-    if(errorOccurred ==1)
+    if(errorOccurred == 1)
     {
-        cout<<"The program couldn't find the marks. Terminating."<<endl;
+        cout<<"The program couldn't find the marks correctly. Please ensure all marks are clearly visible. Terminating."<<endl;
+        return 0;
+    }
+    if(errorOccurred == 2)
+    {
+        cout<<"The program couldn't find the marks correctly. Please ensure there are no red objects in the image. Terminating."<<endl;
         return 0;
     }
     getCorrectedOCR(corners,cornerContours,input,sheet1,sheet2);
-    extractInformation(sheet2);
+    extractInformation(sheet1);
 }
