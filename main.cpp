@@ -13,7 +13,21 @@ typedef vector<Point2f> vp;
 
 int errorOccurred  = 0;
 
-void extractInformation(Mat omrSheet)
+struct CCell
+{
+    bool marked;
+    int x,y,w,h;
+};
+
+struct COmrResult
+{
+    CCell Black[25][21];
+    CCell White[25][21];
+};
+
+
+
+void extractInformation(Mat omrSheet, CCell information[25][21])
 {
     Mat gray,thresholded, box;
     double offsetx = 0.0408*omrSheet.cols;
@@ -41,10 +55,16 @@ void extractInformation(Mat omrSheet)
             threshold(gray,thresholded,0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
             dilate(thresholded,thresholded,getStructuringElement(MORPH_RECT,Size(3,3)));
             //cout<<countNonZero(thresholded)*100.0/(thresholded.rows*thresholded.cols)<<endl;
+            information[j][i].marked = 0;
             if(countNonZero(thresholded)*100.0/(thresholded.rows*thresholded.cols)<70.0)
             {
                 cout<<j+1<<" "<<i*5<<endl;
+                information[j][i].marked = 1;
             }
+            information[j][i].x = offsetx+i*stepX;
+            information[j][i].y = offsety+j*stepY;
+            information[j][i].w = p2.x - information[j][i].x;
+            information[j][i].h = p2.y - information[j][i].y;
         }
     }
     debug namedWindow("Sheet1",CV_WINDOW_NORMAL);
@@ -242,10 +262,16 @@ vvp findMarks(Mat input)
     return contours;
 }
 
-int main()
+bool RecognizeMarks(const char *szFileName,COmrResult &Result)
 {
     Mat input, sheet1,sheet2;
-    input = imread("/home/codestation/Documents/OpenCV/OMR-Computer-Vision/Test/1.jpg");
+    //input = imread("/home/codestation/Documents/OpenCV/OMR-Computer-Vision/Test/1.jpg");
+    input = imread(szFileName);
+    if(input.empty())
+    {
+       cout<<"Could not read image. Please check if file path is valid."<<endl;
+       return 0;
+    }
     vvp marks, cornerContours;
     vp corners;
     marks = findMarks(input);
@@ -261,5 +287,15 @@ int main()
         return 0;
     }
     getCorrectedOCR(corners,cornerContours,input,sheet1,sheet2);
-    extractInformation(sheet1);
+    extractInformation(sheet1,Result.Black);
+    extractInformation(sheet2,Result.White);
+}
+
+int main()
+{
+    const char name[] = "/home/codestation/Documents/OpenCV/OMR-Computer-Vision/Test/1.jpg";
+    COmrResult Result;
+    RecognizeMarks(name, Result);
+    cout<<Result.Black[3][2].marked<<endl;
+    cout<<Result.Black[24][10].marked<<endl;
 }
