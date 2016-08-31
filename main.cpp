@@ -2,7 +2,6 @@
 #include<highgui.hpp>
 #include<core.hpp>
 #include<imgproc.hpp>
-
 using namespace std;
 using namespace cv;
 
@@ -26,21 +25,170 @@ struct COmrResult
 };
 
 
+double absDistance(Point2f point1, Point2f point2)
+{
+    return sqrt(pow((point1.x-point2.x),2)+pow((point1.y-point2.y),2));
+}
+
+int invertImage(Mat &src, Mat &dst)
+{
+    dst=src.clone();
+    MatIterator_<uchar> it,end;
+    for(it=src.begin<uchar>(), end=src.end<uchar>(); it!=end; it++)
+    {
+        *it=255-(*it);
+    }
+}
+
+void gammaCorrection(Mat &src, Mat &dst, float gamma)
+{
+    unsigned char lut[256];
+    for (int i=0;i<256;i++)
+    {
+        lut[i] = saturate_cast<uchar>(pow((float)(i/255.0),gamma)*255.0f);
+    }
+    dst = src.clone();
+    const int channels = dst.channels();
+    switch(channels)
+    {
+    case 1:
+        for(MatIterator_<uchar> it = dst.begin<uchar>(),end=dst.end<uchar>(); it!=end; it++)
+        {
+            *it = lut[(*it)];
+        }
+        break;
+    case 3:
+        MatIterator_<Vec3b> it,end;
+        for(it=dst.begin<Vec3b>(), end=dst.end<Vec3b>(); it!=end; it++)
+        {
+            (*it)[0] = lut[((*it)[0])];
+            (*it)[1] = lut[((*it)[1])];
+            (*it)[2] = lut[((*it)[2])];
+        }
+        break;
+    }
+}
+
+
+Mat drawHistogram(Mat src)
+{
+    Mat temp = src.clone();
+    Mat histogram;
+
+    vector<Mat> splitPlanes;
+    split( temp, splitPlanes);
+
+     /// Establish the number of bins
+    int histSize = 256;
+
+      /// Set the ranges ( for B,G,R) )
+      float range[] = { 0, 256 } ;
+      const float* histRange = { range };
+      int hist_w = 512; int hist_h = 400;
+      int bin_w = cvRound( (double) hist_w/histSize );
+      histogram = Mat::zeros(Size(hist_w,hist_w),CV_8UC3);
+
+      bool uniform = true; bool accumulate = false;
+      int imChannels = temp.channels();
+    if(imChannels == 1)
+    {
+        Mat hist;
+        calcHist( &splitPlanes[0],1,0,Mat(),hist,1,&histSize,&histRange,uniform,accumulate);
+        cv::normalize(hist,hist,0,histogram.rows,NORM_MINMAX,-1,Mat());
+        for( int i = 1; i < histSize; i++ )
+        {
+            line( histogram, Point( bin_w*(i-1), hist_h - cvRound(hist.at<float>(i-1)) ) ,
+                             Point( bin_w*(i), hist_h - cvRound(hist.at<float>(i)) ),
+                             Scalar( 0, 255, 255), 2, 8, 0 );
+        }
+    }
+    if(imChannels == 3)
+    {
+      Mat b_hist, g_hist, r_hist;
+
+      /// Compute the histograms:
+      calcHist( &splitPlanes[0], 1, 0, Mat(), b_hist, 1, &histSize, &histRange, uniform, accumulate );
+      calcHist( &splitPlanes[1], 1, 0, Mat(), g_hist, 1, &histSize, &histRange, uniform, accumulate );
+      calcHist( &splitPlanes[2], 1, 0, Mat(), r_hist, 1, &histSize, &histRange, uniform, accumulate );
+
+      /// Normalize the result to [ 0, histImage.rows ]
+      normalize(b_hist, b_hist, 0, histogram.rows, NORM_MINMAX, -1, Mat() );
+      normalize(g_hist, g_hist, 0, histogram.rows, NORM_MINMAX, -1, Mat() );
+      normalize(r_hist, r_hist, 0, histogram.rows, NORM_MINMAX, -1, Mat() );
+
+    /// Draw for each channel
+    for( int i = 1; i < histSize; i++ )
+    {
+       line( histogram, Point( bin_w*(i-1), hist_h - cvRound(b_hist.at<float>(i-1)) ) ,
+                        Point( bin_w*(i), hist_h - cvRound(b_hist.at<float>(i)) ),
+                        Scalar( 255, 0, 0), 2, 8, 0  );
+       line( histogram, Point( bin_w*(i-1), hist_h - cvRound(g_hist.at<float>(i-1)) ) ,
+                        Point( bin_w*(i), hist_h - cvRound(g_hist.at<float>(i)) ),
+                        Scalar( 0, 255, 0), 2, 8, 0  );
+       line( histogram, Point( bin_w*(i-1), hist_h - cvRound(r_hist.at<float>(i-1)) ) ,
+                        Point( bin_w*(i), hist_h - cvRound(r_hist.at<float>(i)) ),
+                        Scalar( 0, 0, 255), 2, 8, 0  );
+        }
+    }
+
+    return histogram;
+}
+
 
 void extractInformation(Mat omrSheet, CCell information[25][21])
 {
-    Mat gray,thresholded, box;
-    double offsetx = 0.0408*omrSheet.cols;
-    double offsety = 0.0488*omrSheet.rows;
+    Mat gray,thresholded, box,otsuOutput1,otsuOutput2,otsuOutput;
+    Mat omrDup = omrSheet.clone();
+    vvp contours;
+    double maxArea;
+    double offsetx = 0.0358*omrSheet.cols;
+    double offsety = 0.0478*omrSheet.rows;
     double stepX = (omrSheet.cols-offsetx+0.0139*omrSheet.cols)/21.0;
     double stepY = (omrSheet.rows-offsety)/25.0;
+    medianBlur(omrDup,omrDup,5);
+    cvtColor(omrDup,omrDup,CV_BGR2HSV);
+    Mat splitted[3];
+    split(omrDup,splitted);
+//    namedWindow("Sat",CV_WINDOW_NORMAL);
+//    imshow("Sat",splitted[2]);
+    //gammaCorrection(splitted[1],gray,0.5);
+    invertImage(splitted[2],splitted[2]);
+    bitwise_or(splitted[1],splitted[2],otsuOutput);
+    namedWindow("otsu123",CV_WINDOW_NORMAL);
+    imshow("otsu123",otsuOutput);
+    threshold(otsuOutput,otsuOutput,0, 255, CV_THRESH_OTSU);
+
+    //threshold(splitted[1],gray,60,255,CV_THRESH_BINARY_INV);
+    //namedWindow("Thre",CV_WINDOW_NORMAL);
+    //imshow("Thre",gray);
+    namedWindow("otsu",CV_WINDOW_NORMAL);
+    imshow("otsu",otsuOutput);
+
+//    Mat hist0 = drawHistogram(splitted[0]);
+    namedWindow("Hist0",CV_WINDOW_NORMAL);
+    namedWindow("Hist1",CV_WINDOW_NORMAL);
+    imshow("Hist0",splitted[1]);
+//    Mat hist1 = drawHistogram(splitted[1]);
+    imshow("Hist1",splitted[2]);
+//    Mat hist2 = drawHistogram(splitted[2]);
+//    imshow("Hist2",hist2);
+//    waitKey(0);
+//    return;
+    erode(otsuOutput,otsuOutput,getStructuringElement(MORPH_RECT,Size(3,3)));
+//    namedWindow("otsue",CV_WINDOW_NORMAL);
+//    imshow("otsue",otsuOutput);
+    dilate(otsuOutput,otsuOutput,getStructuringElement(MORPH_RECT,Size(7,7)));
+//    namedWindow("otsud",CV_WINDOW_NORMAL);
+//    imshow("otsud",otsuOutput);
+    //erode(otsuOutput,otsuOutput,getStructuringElement(MORPH_RECT,Size(3,3)));
+    //namedWindow("otsu",CV_WINDOW_NORMAL);
+    //imshow("otsu",otsuOutput);
     for(int j=0;j<25;j++)
     {
         for(int i=0; i<21; i++)
         {
-            debug rectangle(omrSheet,Rect(Point(offsetx+i*stepX,offsety+j*stepY),
-                                    Point(offsetx+(i+1)*stepX,offsety+(j+1)*stepY)),Scalar(0,255,0));
-            Point p2 = Point(offsetx+(i+1)*stepX,offsety+(j+1)*stepY);
+
+            Point p2 = Point(offsetx+(i+1)*stepX-offsetx/8,offsety+(j+1)*stepY-0.0047*omrSheet.rows);
             if(p2.x>=omrSheet.cols)
             {
                 p2.x=omrSheet.cols - 1;
@@ -49,14 +197,44 @@ void extractInformation(Mat omrSheet, CCell information[25][21])
             {
                 p2.y = omrSheet.rows-1;
             }
-            Rect crop = Rect(Point(offsetx+i*stepX,offsety+j*stepY),p2);
-            box = omrSheet(crop);
-            cvtColor(box,gray,CV_BGR2GRAY);
-            threshold(gray,thresholded,0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
-            dilate(thresholded,thresholded,getStructuringElement(MORPH_RECT,Size(3,3)));
-            //cout<<countNonZero(thresholded)*100.0/(thresholded.rows*thresholded.cols)<<endl;
+            Point p1 = Point(offsetx+i*stepX-offsetx/8,offsety+j*stepY+0.0047*omrSheet.rows);
+            if(j==0)
+            {
+                p1 = Point(offsetx+i*stepX-offsetx/8,offsety+j*stepY+0.0047*omrSheet.rows+offsety/9);
+            }
+            Rect crop = Rect(p1,p2);
+            debug rectangle(omrSheet,Rect(p1,p2),Scalar(0,255,0));
+            thresholded = otsuOutput(crop);
+            //cout<<"Area"<<crop.area()<<endl;
+//            cvtColor(box,gray,CV_BGR2GRAY);
+//            threshold(box,thresholded,0, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+//            //imshow("1",gray);
+            //imshow("2",thresholded);
+//            dilate(thresholded,thresholded,getStructuringElement(MORPH_RECT,Size(7,7)));
+//            //imshow("3",thresholded);
+//            erode(thresholded,thresholded,getStructuringElement(MORPH_RECT,Size(3,3)));
+//            //imshow("4",thresholded);
+//            bitwise_not(thresholded,thresholded);
+//              imshow("5",thresholded);
+//              waitKey(0);
+//            inRange(box,Scalar(0,0,0),Scalar(255,255,190),thresholded);
+//            erode(thresholded,thresholded,getStructuringElement(MORPH_RECT,Size(2,2)));
+//            dilate(thresholded,thresholded,getStructuringElement(MORPH_RECT,Size(7,7)));
+//            bitwise_not(thresholded,thresholded);
+//            imshow("1",thresholded);
+//            waitKey(0);
+            findContours(thresholded,contours,CV_RETR_TREE, CV_CHAIN_APPROX_NONE);
+            maxArea = 0.0;
+            for(int k=0;k<contours.size();k++)
+            {
+                if(contourArea(contours[k])>maxArea)
+                {
+                    maxArea = contourArea(contours[k]);
+                }
+            }
+            //cout<<(int)(maxArea*100.0/(thresholded.rows*thresholded.cols))<<" ";
             information[j][i].marked = 0;
-            if(countNonZero(thresholded)*100.0/(thresholded.rows*thresholded.cols)<70.0)
+            if(maxArea*100.0/(thresholded.rows*thresholded.cols)>=15)
             {
                 cout<<j+1<<" "<<i*5<<endl;
                 information[j][i].marked = 1;
@@ -66,10 +244,12 @@ void extractInformation(Mat omrSheet, CCell information[25][21])
             information[j][i].w = p2.x - information[j][i].x;
             information[j][i].h = p2.y - information[j][i].y;
         }
+        cout<<endl;
     }
     debug namedWindow("Sheet1",CV_WINDOW_NORMAL);
     debug imshow("Sheet1",omrSheet);
     debug waitKey(0);
+    cout<<endl<<endl<<endl;
 }
 
 void getCorrectedOCR(vp corners, vvp cornerContours, Mat input, Mat &sheet1, Mat &sheet2)
@@ -130,11 +310,6 @@ void getCorrectedOCR(vp corners, vvp cornerContours, Mat input, Mat &sheet1, Mat
     warpPerspective(input, sheet2, lambda, sheet2.size());
     resize(sheet2, sheet2, sheet2Rect.size());
 
-}
-
-double absDistance(Point2f point1, Point2f point2)
-{
-    return sqrt(pow((point1.x-point2.x),2)+pow((point1.y-point2.y),2));
 }
 
 vp findOMR(vvp marks, Mat input, vvp &cornerContours)
@@ -215,22 +390,13 @@ vvp getLocationOfMarks(Mat thresholded)
     vvp marks;
 
     findContours(thresholded, contours, CV_RETR_TREE, CV_CHAIN_APPROX_NONE);
-
-    // Removing contours which are very big or very small
-    if(contours.size()>6)
+    for(int i = 0; i < contours.size(); i++)
     {
-        for(int i = 0; i < contours.size(); i++)
+        if(contourArea(contours[i])>=0.0001*thresholded.rows*thresholded.cols
+                && contourArea(contours[i])<=0.005*thresholded.rows*thresholded.cols)
         {
-            if(contourArea(contours[i])>=0.0001*thresholded.rows*thresholded.cols
-                    && contourArea(contours[i])<=0.001*thresholded.rows*thresholded.cols)
-            {
-                marks.push_back(contours[i]);
-            }
+            marks.push_back(contours[i]);
         }
-    }
-    else
-    {
-        marks = contours;
     }
     return marks;
 }
@@ -246,26 +412,42 @@ vvp findMarks(Mat input)
     // TODO
     // The values of val need to be set according to the intensity levels of the image
 
-    int lowH=9, lowS=80, lowV=80, highH=160, highS=255, highV=255;
+    int lowH=5, lowS=0, lowV=0, highH=160, highS=255, highV=255;
     vvp contours;
     cvtColor(input,inputHSV,CV_BGR2HSV);
 
-    medianBlur(inputHSV, inputHSV ,5);
+    medianBlur(inputHSV, inputHSV ,9);
     // Since red circles around in the HSV domain, the ranges for hue 0-low  and high-255 have been used
     // instead of 0<=low<high<=255
-
-    inRange(inputHSV, Scalar(0,lowS,lowV),Scalar(lowH, highS, highV), temp1);
-    inRange(inputHSV, Scalar(highH,lowS,lowV),Scalar(255, highS, highV), temp2);
-    bitwise_or(temp1,temp2,thresholded);
-
-    contours = getLocationOfMarks(thresholded);
+    bool found=false;
+    for(lowS=80;lowS<=180;lowS+=10)
+    {
+        for(lowV=80;lowV<=180;lowV+=10)
+        {
+            inRange(inputHSV, Scalar(0,lowS,lowV),Scalar(lowH, highS, highV), temp1);
+            inRange(inputHSV, Scalar(highH,lowS,lowV),Scalar(255, highS, highV), temp2);
+            bitwise_or(temp1,temp2,thresholded);
+//            namedWindow("Thresholded",CV_WINDOW_NORMAL);
+//            imshow("Thresholded",thresholded);
+//            waitKey(0);
+            //cout<<lowS<<" "<<lowV<<endl;
+            contours = getLocationOfMarks(thresholded);
+            if(contours.size()==6)
+            {
+                found=true;
+                break;
+            }
+        }
+        if(found==true)
+            break;
+        contours.clear();
+    }
     return contours;
 }
 
 bool RecognizeMarks(const char *szFileName,COmrResult &Result)
 {
     Mat input, sheet1,sheet2;
-    //input = imread("/home/codestation/Documents/OpenCV/OMR-Computer-Vision/Test/1.jpg");
     input = imread(szFileName);
     if(input.empty())
     {
@@ -293,9 +475,7 @@ bool RecognizeMarks(const char *szFileName,COmrResult &Result)
 
 int main()
 {
-    const char name[] = "/home/codestation/Documents/OpenCV/OMR-Computer-Vision/Test/1.jpg";
+    const char name[] = "/home/codestation/Documents/OpenCV/OMR-Computer-Vision/Test/Test/2/1.jpg";
     COmrResult Result;
     RecognizeMarks(name, Result);
-    cout<<Result.Black[3][2].marked<<endl;
-    cout<<Result.Black[24][10].marked<<endl;
 }
